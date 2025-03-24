@@ -1,0 +1,30 @@
+{
+    "name": "Office Maze - Level 1",
+    "description": "Navigate through the complex office corridors to find the exit",
+    "legend": {
+        ".": "Floor",
+        "-": "Wall", 
+        "S": "Start position",
+        "E": "End/goal position",
+        "x": "Hidden area (inaccessible to player)"
+    },
+    "grid": [
+        "...............",
+        ".S--.---------.",
+        ".-.-.---.-.-.-.",
+        ".-.-----.---.-.",
+        ".-.......-..-.-.",
+        ".-----.-------.",
+        "......-.....-.-.",
+        ".---.-------.-.",
+        ".-.-.......-..",
+        ".-.-----.-.---.",
+        ".-.......-.-.-..",
+        ".-----.-.---.-.",
+        "......-.......-..",
+        ".---.----------E.",
+        "..............."
+    ],
+    "difficulty": "easy",
+    "timeLimit": 180
+}

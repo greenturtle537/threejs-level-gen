@@ -1,3 +1,4 @@
-# For testing
-threejsdemo-main.zip
-/threejsdemo-main
+# npm stuff
+node_modules
+package-lock.json
+package.json
