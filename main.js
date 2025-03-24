@@ -11,6 +11,7 @@ const KEYS = {
     s: 83,
     w: 87,
     d: 68,
+    q: 81,  // Added Q key for debug mode toggle
     space: 32,
     shift: 16,
     left: 37,
@@ -153,8 +154,15 @@ class FirstPersonCamera {
         this.objects_ = objects || [];
         this.forwardSpeed_ = 2;
         this.strafeSpeed_ = 2;
+        this.verticalSpeed_ = 2; // Added for freefly mode
         this.bobIntensity_ = 0.1;
         this.collisionSystem_ = collisionSystem; // Collision detection system
+        this.freeflyMode_ = false; // Track camera mode
+    }
+
+    // Toggle between FPS and freefly mode
+    toggleFreeflyMode(enabled) {
+        this.freeflyMode_ = enabled;
     }
 
     update(timeElapsedS) {
@@ -163,7 +171,12 @@ class FirstPersonCamera {
         }
         this.updateRotation_(timeElapsedS);
         this.updateTranslation_(timeElapsedS);
-        this.updateHeadBob_(timeElapsedS);
+        
+        // Only apply head bob in FPS mode
+        if (!this.freeflyMode_) {
+            this.updateHeadBob_(timeElapsedS);
+        }
+        
         this.updateCamera_(timeElapsedS);
         this.input_.update(timeElapsedS);
     }
@@ -171,10 +184,14 @@ class FirstPersonCamera {
     updateCamera_(_) {
         this.camera_.quaternion.copy(this.rotation_);
         this.camera_.position.copy(this.translation_);
-        this.camera_.position.y += Math.sin(this.headBobTimer_ * 10) * this.bobIntensity_;
         
-        // Update collision system with new player position
-        if (this.collisionSystem_) {
+        // Only apply head bob in FPS mode
+        if (!this.freeflyMode_) {
+            this.camera_.position.y += Math.sin(this.headBobTimer_ * 10) * this.bobIntensity_;
+        }
+        
+        // Update collision system with new player position, only in FPS mode
+        if (this.collisionSystem_ && !this.freeflyMode_) {
             this.collisionSystem_.updatePlayerPosition(this.camera_.position);
         }
     }
@@ -200,6 +217,10 @@ class FirstPersonCamera {
             (this.input_.key(KEYS.w) ? 1 : 0) + (this.input_.key(KEYS.s) ? -1 : 0);
         const strafeVelocity =
             (this.input_.key(KEYS.a) ? 1 : 0) + (this.input_.key(KEYS.d) ? -1 : 0);
+        
+        // Vertical movement in freefly mode
+        const verticalVelocity = this.freeflyMode_ ? 
+            (this.input_.key(KEYS.space) ? 1 : 0) + (this.input_.key(KEYS.shift) ? -1 : 0) : 0;
 
         const qx = new THREE.Quaternion();
         qx.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.phi_);
@@ -212,6 +233,10 @@ class FirstPersonCamera {
         left.applyQuaternion(qx);
         left.multiplyScalar(strafeVelocity * timeElapsedS * this.strafeSpeed_);
 
+        // Add vertical movement for freefly mode
+        const up = new THREE.Vector3(0, 1, 0);
+        up.multiplyScalar(verticalVelocity * timeElapsedS * this.verticalSpeed_);
+
         // Store current position for collision check
         const currentPosition = this.translation_.clone();
         
@@ -220,22 +245,28 @@ class FirstPersonCamera {
         proposedPosition.add(forward);
         proposedPosition.add(left);
         
-        // Check for collisions and get adjusted position
-        if (this.collisionSystem_) {
-            const adjustedPosition = this.collisionSystem_.checkCollisions(
-                currentPosition, 
-                proposedPosition
-            );
-            
-            // Update with collision-adjusted position
-            this.translation_.copy(adjustedPosition);
+        if (this.freeflyMode_) {
+            // In freefly mode, just apply movement with no collisions
+            proposedPosition.add(up);
+            this.translation_.copy(proposedPosition);
         } else {
-            // No collision system, just update normally
-            this.translation_.add(forward);
-            this.translation_.add(left);
+            // In FPS mode, check collisions
+            if (this.collisionSystem_) {
+                const adjustedPosition = this.collisionSystem_.checkCollisions(
+                    currentPosition, 
+                    proposedPosition
+                );
+                
+                // Update with collision-adjusted position
+                this.translation_.copy(adjustedPosition);
+            } else {
+                // No collision system, just update normally
+                this.translation_.add(forward);
+                this.translation_.add(left);
+            }
         }
 
-        if (forwardVelocity != 0 || strafeVelocity != 0) {
+        if ((forwardVelocity != 0 || strafeVelocity != 0) && !this.freeflyMode_) {
             this.headBobActive_ = true;
         }
     }
@@ -266,6 +297,9 @@ class FirstPersonCamera {
 
 class threejsdemo {
         constructor() {
+                // Debug flag
+                this.debug = true;
+                
                 // Create scene
                 this.scene = new THREE.Scene();
                 this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -316,6 +350,11 @@ class threejsdemo {
                 // Resource manager for cleanup
                 this.resourceManager = new ResourceManager();
                 
+                // Debug mode variables
+                this.debugModeActive = false;
+                this.qKeyPressed = false;
+                this.startPosition = new THREE.Vector3();
+                
                 // Load and generate the level
                 this.loadLevel('level1.json');
         }
@@ -344,6 +383,9 @@ class threejsdemo {
                         if (level.userData.startPosition) {
                                 this.camera.position.copy(level.userData.startPosition);
                                 this.fpsCamera.translation_.copy(level.userData.startPosition);
+                                
+                                // Store starting position for debug mode respawn
+                                this.startPosition.copy(level.userData.startPosition);
                                 
                                 // Create player collider
                                 this.collisionSystem.createPlayerCollider(level.userData.startPosition);
@@ -393,6 +435,33 @@ class threejsdemo {
                 return false;
         }
         
+        // Handle debug mode toggle
+        checkDebugModeToggle() {
+                if (!this.debug) return;
+                
+                const qKeyCurrentlyPressed = this.fpsCamera.input_.key(KEYS.q);
+                
+                // Toggle only on key press (not hold)
+                if (qKeyCurrentlyPressed && !this.qKeyPressed) {
+                        // Toggle debug mode
+                        this.debugModeActive = !this.debugModeActive;
+                        
+                        // Update camera mode
+                        this.fpsCamera.toggleFreeflyMode(this.debugModeActive);
+                        
+                        if (this.debugModeActive) {
+                                console.log("Debug: Freefly mode activated");
+                        } else {
+                                console.log("Debug: FPS mode restored");
+                                // Respawn at start position when returning to FPS mode
+                                this.fpsCamera.translation_.copy(this.startPosition);
+                        }
+                }
+                
+                // Update key state
+                this.qKeyPressed = qKeyCurrentlyPressed;
+        }
+        
         onWindowResize() {
                 this.camera.aspect = window.innerWidth / window.innerHeight;
                 this.camera.updateProjectionMatrix();
@@ -413,6 +482,9 @@ class threejsdemo {
                         
                         // Update at fixed intervals for consistent physics
                         while (this.timeAccumulator >= this.fixedTimeStep) {
+                                // Check for debug mode toggle
+                                this.checkDebugModeToggle();
+                                
                                 // Update camera with head bobbing
                                 this.fpsCamera.update(this.fixedTimeStep);
                                 

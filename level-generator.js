@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { TextureGenerator } from './texture-generator.js';
 import { ResourceManager } from './resource-manager.js';
 import { SpatialHashGrid } from './spatial-hash-grid.js';
+import { FluorescentLight } from './fluorescent-light.js';
+
 
 export class LevelGenerator {
     constructor() {
@@ -103,6 +105,15 @@ export class LevelGenerator {
     isHiddenCell(cell) {
         return cell === 'x';
     }
+    
+    /**
+     * Determine if a cell represents a wall based on legend
+     * @param {string} cell - The cell character
+     * @returns {boolean} - True if cell is a wall, false otherwise
+     */
+    isWallCell(cell) {
+        return cell === '-' || cell === '|';
+    }
 
     async loadLevel(levelFile) {
         try {
@@ -159,8 +170,34 @@ export class LevelGenerator {
         levelGroup.add(ambient);
     }
 
+    identifyLightPositions(grid) {
+        const lightPositions = [];
+    
+        for (let z = 1; z < grid.length - 1; z++) {
+            for (let x = 1; x < grid[z].length - 1; x++) {
+                if (grid[z][x] !== 'l') continue;
+    
+                const vertical = this.isWalkableCell(grid[z-1][x]) && 
+                            this.isWalkableCell(grid[z+1][x]) && 
+                            !this.isWalkableCell(grid[z][x-1]) && 
+                            !this.isWalkableCell(grid[z][x+1]);
+    
+                // Add light position with appropriate rotation
+                lightPositions.push({
+                    x: x * this.corridorWidth,
+                    z: z * this.corridorWidth,
+                    rotation: (!vertical) ? Math.PI/2 : 0
+                });
+            }
+        }
+        return lightPositions;
+    }
+    
+
     generateGrid(levelGroup, levelData) {
-        const grid = this.parseGridFormat(levelData.grid);
+        // Use legend-aware parsing
+        const rawGrid = levelData.grid;
+        const grid = this.parseGridFormat(rawGrid);
         const directions = [
             {x: 0, z: -1},
             {x: 1, z: 0},
@@ -210,18 +247,22 @@ export class LevelGenerator {
             for (let x = 0; x < grid[z].length; x++) {
                 const cell = grid[z][x];
                 
-                if (cell === '-') {
+                if (this.isWallCell(cell)) {
                     this.createWallBlock(levelGroup, x, z);
-                } else if (cell === 'x') {
+                } else if (this.isHiddenCell(cell)) {
                     // Hidden area: do nothing
-                } else if (cell === '.' || cell === 'S' || cell === 'E') {
+                } else if (this.isWalkableCell(cell)) {
+                    // For walkable cells, check surrounding directions
                     for (let i = 0; i < 4; i++) {
                         const nx = x + directions[i].x;
                         const nz = z + directions[i].z;
                         
-                        if (nx < 0 || nx >= grid[z].length || 
+                        if (
+                            nx < 0 || nx >= grid[z].length || 
                             nz < 0 || nz >= grid.length || 
-                            grid[nz][nx] === '-' || grid[nz][nx] === 'x') {
+                            this.isWallCell(grid[nz][nx]) || 
+                            this.isHiddenCell(grid[nz][nx])
+                        ) {
                             this.createWall(levelGroup, x, z, i);
                         }
                     }
@@ -236,6 +277,17 @@ export class LevelGenerator {
                 }
             }
         }
+
+            // After creating walls, add lights
+        const fluorescentLight = new FluorescentLight();
+        const lightPositions = this.identifyLightPositions(grid);
+
+        lightPositions.forEach(pos => {
+            const light = fluorescentLight.createLightFixture(true);
+            light.position.set(pos.x, this.roomHeight - 0.1, pos.z);
+            light.rotation.y = pos.rotation;
+            levelGroup.add(light);
+        });
         
         // Store positions in the level group for easy access
         if (startPosition) {
